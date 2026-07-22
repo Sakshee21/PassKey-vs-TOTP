@@ -1,21 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, user_from_token
+from app.api.deps import get_current_user
 from app.core.database import get_db
-from app.core.security import create_access_token, verify_secret
+from app.core.security import create_password_pending_token, create_registration_token, verify_secret
 from app.models.backup_code import BackupCode
 from app.models.user import User
 from app.schemas.auth import (
     BackupCodeRegenerateResponse,
+    BackupCodeSecondFactorResponse,
     BackupCodeStatusResponse,
     BackupCodeVerifyRequest,
-    BackupCodeVerifyResponse,
+    SecondFactorResponse,
     TOTPEnableRequest,
     TOTPEnableResponse,
     TOTPSetupResponse,
-    TOTPVerifyRequest,
-    Token,
+    TotpVerifyRequest,
 )
 from app.services.totp_service import (
     generate_backup_codes,
@@ -66,19 +66,41 @@ def disable_totp(
     db.commit()
 
 
-@router.post("/verify", response_model=Token)
-def verify_totp(payload: TOTPVerifyRequest, db: Session = Depends(get_db)) -> Token:
-    user = user_from_token(payload.login_token, "login_pending", db)
-    if not user.totp_secret or not verify_totp_code(user.totp_secret, payload.code):
-        raise HTTPException(status_code=401, detail="Invalid TOTP code")
-    return Token(access_token=create_access_token(user.id, method="password_totp"))
+@router.post("/verify", response_model=SecondFactorResponse)
+def verify_totp(
+    payload: TotpVerifyRequest, db: Session = Depends(get_db)
+) -> SecondFactorResponse:
+    """First step of password+TOTP login: verify the TOTP code *before* the
+    password is asked for. Success yields a `password_token`, not an access
+    token - /auth/login still needs the password to actually sign in."""
+    user = db.query(User).filter(User.email == payload.email).first()
+    if user is not None and not user.is_fully_registered:
+        return SecondFactorResponse(
+            registration_incomplete=True,
+            registration_token=create_registration_token(user.id),
+        )
+    if user is None or not user.totp_secret or not verify_totp_code(user.totp_secret, payload.code):
+        raise HTTPException(status_code=401, detail="Invalid email or code")
+
+    return SecondFactorResponse(
+        password_token=create_password_pending_token(user.id, second_factor="totp")
+    )
 
 
-@router.post("/verify-backup-code", response_model=BackupCodeVerifyResponse)
+@router.post("/verify-backup-code", response_model=BackupCodeSecondFactorResponse)
 def verify_backup_code(
     payload: BackupCodeVerifyRequest, db: Session = Depends(get_db)
-) -> BackupCodeVerifyResponse:
-    user = user_from_token(payload.login_token, "login_pending", db)
+) -> BackupCodeSecondFactorResponse:
+    """First step of password+backup-code login - same idea as /verify above,
+    but with a one-time backup code standing in for the TOTP code."""
+    user = db.query(User).filter(User.email == payload.email).first()
+    if user is not None and not user.is_fully_registered:
+        return BackupCodeSecondFactorResponse(
+            registration_incomplete=True,
+            registration_token=create_registration_token(user.id),
+        )
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid email or backup code")
 
     unused_codes = (
         db.query(BackupCode)
@@ -95,8 +117,8 @@ def verify_backup_code(
     db.commit()
 
     remaining = sum(1 for bc in unused_codes if bc.id != matched.id)
-    return BackupCodeVerifyResponse(
-        access_token=create_access_token(user.id, method="password_backup_code"),
+    return BackupCodeSecondFactorResponse(
+        password_token=create_password_pending_token(user.id, second_factor="backup_code"),
         backup_codes_remaining=remaining,
     )
 

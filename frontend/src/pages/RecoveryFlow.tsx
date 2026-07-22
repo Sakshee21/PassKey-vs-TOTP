@@ -1,10 +1,10 @@
 import { useState } from "react";
 import {
-  login,
+  completeLogin,
   persistSession,
   registerPasskey,
-  verifyBackupCode,
-  verifyTotp,
+  verifyBackupCodeFirst,
+  verifyTotpFirst,
 } from "../lib/auth";
 import { ApiError } from "../lib/api";
 
@@ -14,63 +14,71 @@ interface Props {
   onCancel: () => void;
 }
 
-type Phase = "verify" | "verified";
+type Phase = "code" | "password" | "verified";
 
 const LOW_BACKUP_CODES_THRESHOLD = 3;
 
 export function RecoveryFlow({ prefillEmail, onComplete, onCancel }: Props) {
-  const [phase, setPhase] = useState<Phase>("verify");
+  const [phase, setPhase] = useState<Phase>("code");
   const [email, setEmail] = useState(prefillEmail ?? "");
-  const [password, setPassword] = useState("");
-  const [loginToken, setLoginToken] = useState<string | null>(null);
-  const [totpCode, setTotpCode] = useState("");
+  const [code, setCode] = useState("");
   const [backupCode, setBackupCode] = useState("");
   const [useBackupCode, setUseBackupCode] = useState(false);
+  const [passwordToken, setPasswordToken] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
   const [lowCodesWarning, setLowCodesWarning] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [passkeyRegistered, setPasskeyRegistered] = useState(false);
 
-  async function handlePasswordSubmit(e: React.FormEvent) {
+  async function handleSecondFactorSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const result = await login(email, password);
-      if (result.token) {
-        persistSession(result.token);
-        setPhase("verified");
-      } else if (result.totp_required && result.login_token) {
-        setLoginToken(result.login_token);
+      let passwordTokenResult: string | null;
+      let remaining: number | null = null;
+      if (useBackupCode) {
+        const result = await verifyBackupCodeFirst(email, backupCode);
+        if (result.registration_incomplete) {
+          setError("This account hasn't finished the registration wizard yet.");
+          return;
+        }
+        passwordTokenResult = result.password_token;
+        remaining = result.backup_codes_remaining;
       } else {
-        setError("This account hasn't finished the registration wizard yet.");
+        const result = await verifyTotpFirst(email, code);
+        if (result.registration_incomplete) {
+          setError("This account hasn't finished the registration wizard yet.");
+          return;
+        }
+        passwordTokenResult = result.password_token;
+      }
+      if (passwordTokenResult) {
+        setPasswordToken(passwordTokenResult);
+        if (remaining !== null && remaining < LOW_BACKUP_CODES_THRESHOLD) {
+          setLowCodesWarning(remaining);
+        }
+        setPhase("password");
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong");
+      setError(err instanceof ApiError ? err.message : "Invalid code");
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleVerifySubmit(e: React.FormEvent) {
+  async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!loginToken) return;
+    if (!passwordToken) return;
     setError(null);
     setBusy(true);
     try {
-      if (useBackupCode) {
-        const result = await verifyBackupCode(loginToken, backupCode);
-        persistSession(result);
-        if (result.backup_codes_remaining < LOW_BACKUP_CODES_THRESHOLD) {
-          setLowCodesWarning(result.backup_codes_remaining);
-        }
-      } else {
-        const token = await verifyTotp(loginToken, totpCode);
-        persistSession(token);
-      }
+      const token = await completeLogin(passwordToken, password);
+      persistSession(token);
       setPhase("verified");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Invalid code");
+      setError(err instanceof ApiError ? err.message : "Incorrect password");
     } finally {
       setBusy(false);
     }
@@ -123,33 +131,22 @@ export function RecoveryFlow({ prefillEmail, onComplete, onCancel }: Props) {
     );
   }
 
-  if (loginToken) {
+  if (phase === "password") {
     return (
       <div className="card">
-        <h2>Verify it's you</h2>
-        <form onSubmit={handleVerifySubmit}>
-          {useBackupCode ? (
-            <input
-              placeholder="Backup code"
-              value={backupCode}
-              onChange={(e) => setBackupCode(e.target.value)}
-              autoFocus
-            />
-          ) : (
-            <input
-              placeholder="6-digit authenticator code"
-              value={totpCode}
-              onChange={(e) => setTotpCode(e.target.value)}
-              inputMode="numeric"
-              autoFocus
-            />
-          )}
+        <h2>Enter your password</h2>
+        <form onSubmit={handlePasswordSubmit}>
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoFocus
+          />
           {error && <p className="error">{error}</p>}
           <button type="submit" disabled={busy}>
-            Verify
-          </button>
-          <button type="button" className="secondary" onClick={() => setUseBackupCode((v) => !v)}>
-            {useBackupCode ? "Use authenticator code instead" : "Use a backup code instead"}
+            Verify identity
           </button>
         </form>
       </div>
@@ -160,9 +157,10 @@ export function RecoveryFlow({ prefillEmail, onComplete, onCancel }: Props) {
     <div className="card">
       <h2>Lost your passkey?</h2>
       <p className="hint">
-        Sign in with your password to verify it's you, then register a new passkey.
+        Verify your authenticator code (or a backup code) first, then your password, to regain
+        access and register a new passkey.
       </p>
-      <form onSubmit={handlePasswordSubmit}>
+      <form onSubmit={handleSecondFactorSubmit}>
         <input
           type="email"
           placeholder="Email"
@@ -170,16 +168,26 @@ export function RecoveryFlow({ prefillEmail, onComplete, onCancel }: Props) {
           onChange={(e) => setEmail(e.target.value)}
           required
         />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+        {useBackupCode ? (
+          <input
+            placeholder="Backup code"
+            value={backupCode}
+            onChange={(e) => setBackupCode(e.target.value)}
+          />
+        ) : (
+          <input
+            placeholder="6-digit authenticator code"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            inputMode="numeric"
+          />
+        )}
         {error && <p className="error">{error}</p>}
         <button type="submit" disabled={busy}>
-          Verify identity
+          Continue
+        </button>
+        <button type="button" className="secondary" onClick={() => setUseBackupCode((v) => !v)}>
+          {useBackupCode ? "Use authenticator code instead" : "Use a backup code instead"}
         </button>
       </form>
       <button

@@ -83,14 +83,18 @@ App: http://localhost:5173
   bcrypt-hashed backup codes issued) → a passkey (WebAuthn, discoverable/resident required). The
   account only counts as fully registered — and can only get a real access token — once all three
   are done; abandoning partway through resumes where you left off next time you try to log in.
-- **Password + TOTP login** (`/auth/login`, `/totp/verify` or `/totp/verify-backup-code`) —
-  `bcrypt`-hashed password, then a mandatory second factor (every fully-registered account has TOTP
-  enabled).
-- **Passkey login** (`/webauthn/authenticate/*`) — a single WebAuthn ceremony, no password step.
-- **Account recovery** (frontend `RecoveryFlow`, "Lost your passkey?" on the sign-in page) — proves
-  identity via password + (TOTP or a backup code), then offers to register a replacement passkey.
-  Backup codes are single-use (`used` flips to `true` on consumption) and the UI warns once fewer
-  than 3 remain; regenerate a fresh set of 10 anytime from the dashboard.
+- **Password + TOTP login** — deliberately reversed order: the second factor is verified *first*,
+  the password *last*. `/totp/verify` or `/totp/verify-backup-code` take `{email, code}` (no
+  password) and return a short-lived `password_token`; `/auth/login` then takes
+  `{password_token, password}` and issues the real access token. Every fully-registered account has
+  TOTP enabled, so this is the only password-login path.
+- **Passkey login** (`/webauthn/authenticate/*`) — a single WebAuthn ceremony, no password step, no
+  ordering to speak of.
+- **Account recovery** (frontend `RecoveryFlow`, "Lost your passkey?" on the sign-in page) — same
+  flipped order as above (TOTP-or-backup-code, then password) to prove identity, then offers to
+  register a replacement passkey. Backup codes are single-use (`used` flips to `true` on
+  consumption) and the UI warns once fewer than 3 remain; regenerate a fresh set of 10 anytime from
+  the dashboard.
 - **Dashboard** (`/dashboard`, JWT-gated — redirects to `/` without a valid session) — shows which
   method authenticated *this session* (read from a `method` claim on the access token: passkey /
   password+TOTP / password+backup-code), an account overview (passkeys, backup codes remaining,

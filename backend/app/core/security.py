@@ -41,9 +41,17 @@ def create_access_token(
     )
 
 
-def create_login_token(user_id: UUID) -> str:
-    """Short-lived token proving the password step passed; used to complete 2FA."""
-    return _create_token(user_id, "login_pending", expires_minutes=5)
+SecondFactor = Literal["totp", "backup_code"]
+
+
+def create_password_pending_token(user_id: UUID, second_factor: SecondFactor) -> str:
+    """Proves the second factor (TOTP or a backup code) was verified *before*
+    the password - the deliberately-flipped order for password+TOTP login.
+    `second_factor` is carried through so the final access token's `method`
+    claim can distinguish "password_totp" from "password_backup_code"."""
+    return _create_token(
+        user_id, "password_pending", expires_minutes=5, extra_claims={"second_factor": second_factor}
+    )
 
 
 def create_registration_token(user_id: UUID) -> str:

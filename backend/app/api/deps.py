@@ -12,8 +12,10 @@ from app.models.user import User
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
-def user_from_token(token: str, purpose: str, db: Session) -> User:
-    """Resolve a user from a JWT of the given purpose, or raise 401."""
+def decode_purpose_token(token: str, purpose: str) -> dict:
+    """Decode a JWT and check its `purpose` claim, or raise 401. Returns the
+    full payload so callers needing extra claims (e.g. `second_factor`) don't
+    have to decode twice."""
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
@@ -23,8 +25,22 @@ def user_from_token(token: str, purpose: str, db: Session) -> User:
         payload = decode_token(token)
         if payload.get("purpose") != purpose:
             raise unauthorized
+    except jwt.PyJWTError:
+        raise unauthorized
+    return payload
+
+
+def user_from_token(token: str, purpose: str, db: Session) -> User:
+    """Resolve a user from a JWT of the given purpose, or raise 401."""
+    payload = decode_purpose_token(token, purpose)
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
         user_id = uuid.UUID(payload["sub"])
-    except (jwt.PyJWTError, KeyError, ValueError):
+    except (KeyError, ValueError):
         raise unauthorized
 
     user = db.get(User, user_id)

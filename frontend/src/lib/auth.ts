@@ -2,12 +2,12 @@ import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import { api, decodeJwtPayload, getToken, setToken } from "./api";
 import type {
   BackupCodeRegenerateResponse,
+  BackupCodeSecondFactorResponse,
   BackupCodeStatusResponse,
-  BackupCodeVerifyResponse,
   LoginMethod,
-  LoginResponse,
   RegisterStartResponse,
   RegisterStatusResponse,
+  SecondFactorResponse,
   TOTPEnableResponse,
   TOTPSetupResponse,
   Token,
@@ -15,8 +15,29 @@ import type {
   WebAuthnCredentialOut,
 } from "./types";
 
-export function login(email: string, password: string): Promise<LoginResponse> {
-  return api.post<LoginResponse>("/auth/login", { email, password });
+// --- Password+TOTP login: second factor first, password last ----------------
+// (deliberately flipped from the usual order - see /totp/verify docs)
+
+/** Step 1a: verify a TOTP code before any password is asked for. */
+export function verifyTotpFirst(email: string, code: string): Promise<SecondFactorResponse> {
+  return api.post<SecondFactorResponse>("/totp/verify", { email, code });
+}
+
+/** Step 1b: verify a backup code instead, when the authenticator app is unavailable. */
+export function verifyBackupCodeFirst(
+  email: string,
+  backupCode: string,
+): Promise<BackupCodeSecondFactorResponse> {
+  return api.post<BackupCodeSecondFactorResponse>("/totp/verify-backup-code", {
+    email,
+    backup_code: backupCode,
+  });
+}
+
+/** Step 2: the second factor already passed (proven by `passwordToken`); now
+ * check the password and finish signing in. */
+export function completeLogin(passwordToken: string, password: string): Promise<Token> {
+  return api.post<Token>("/auth/login", { password_token: passwordToken, password });
 }
 
 export function me(): Promise<User> {
@@ -97,20 +118,6 @@ export function enableTotp(secret: string, code: string): Promise<TOTPEnableResp
 
 export function disableTotp(): Promise<void> {
   return api.post<void>("/totp/disable", undefined, getToken() ?? undefined);
-}
-
-export function verifyTotp(loginToken: string, code: string): Promise<Token> {
-  return api.post<Token>("/totp/verify", { login_token: loginToken, code });
-}
-
-export function verifyBackupCode(
-  loginToken: string,
-  backupCode: string,
-): Promise<BackupCodeVerifyResponse> {
-  return api.post<BackupCodeVerifyResponse>("/totp/verify-backup-code", {
-    login_token: loginToken,
-    backup_code: backupCode,
-  });
 }
 
 export function getBackupCodesStatus(): Promise<BackupCodeStatusResponse> {

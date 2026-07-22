@@ -12,12 +12,16 @@ export interface Token {
 
 export type LoginMethod = "passkey" | "password_totp" | "password_backup_code" | "password";
 
-export interface LoginResponse {
+/** Result of the *first* step of password+TOTP login: verifying the second
+ * factor before any password is asked for. */
+export interface SecondFactorResponse {
   registration_incomplete: boolean;
   registration_token: string | null;
-  totp_required: boolean;
-  login_token: string | null;
-  token: Token | null;
+  password_token: string | null;
+}
+
+export interface BackupCodeSecondFactorResponse extends SecondFactorResponse {
+  backup_codes_remaining: number | null;
 }
 
 export interface RegisterStartResponse {
@@ -38,10 +42,6 @@ export interface TOTPSetupResponse {
 
 export interface TOTPEnableResponse {
   backup_codes: string[];
-}
-
-export interface BackupCodeVerifyResponse extends Token {
-  backup_codes_remaining: number;
 }
 
 export interface BackupCodeStatusResponse {
