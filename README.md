@@ -37,12 +37,30 @@ docker-compose.yml   # local Postgres
 
 ## Local setup
 
-### 1. Start Postgres
+**Docker is optional.** It's only used to run Postgres — the app itself (backend, frontend) never
+runs in a container. `docker-compose.yml` exists purely as a convenient, disposable way to get a
+Postgres matching `backend/.env.example`'s defaults. If you already have Postgres (native install,
+WSL, a cloud instance, whatever), skip Docker entirely and just point `DATABASE_URL` at it.
+
+### 1. Get a Postgres
+
+**With Docker:**
 
 ```bash
 cp .env.example .env
 docker compose up -d postgres
 ```
+
+**Without Docker** — use any Postgres you already have. Create a matching user/db (or reuse
+whatever credentials you already have and adjust `DATABASE_URL` in step 2 accordingly):
+
+```bash
+createuser passkey_user -P    # prompts for a password; use "passkey_pass" to match the example env, or pick your own
+createdb passkey_vs_totp -O passkey_user
+```
+
+Either way, the only thing the backend actually needs is a reachable `DATABASE_URL` — how the
+Postgres behind it got there doesn't matter.
 
 ### 2. Backend
 
