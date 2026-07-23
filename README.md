@@ -117,6 +117,24 @@ App: http://localhost:5173
   method authenticated *this session* (read from a `method` claim on the access token: passkey /
   password+TOTP / password+backup-code), an account overview (passkeys, backup codes remaining,
   TOTP status), and management actions (add another passkey, regenerate backup codes).
+- **Analytics** (`/analytics`, **admin-only**) — aggregates `auth_events` across all accounts
+  (success rate and average latency by method, login attempts over time, failure-reason breakdown).
+  Restricted to accounts with `role="admin"` on the `users` table:
+  - There is **no separate admin login** — an admin authenticates through the exact same
+    passkey / password+TOTP infrastructure as everyone else. `role` only changes what an
+    already-authenticated account is allowed to see, not how it signs in.
+  - Enforced on the backend via a `require_admin` dependency (`app/api/deps.py`), applied at the
+    router level to everything under `/api/analytics/*`, checked against the JWT-*resolved* User
+    (a fresh DB lookup on every request) rather than a claim baked into the token — so a revoked
+    admin role takes effect on the next request, not just at next login.
+  - Enforced on the frontend too (hides the nav link for non-admins; a non-admin hitting
+    `/analytics` directly sees an explicit 403 state, not a silent redirect) — but the backend
+    check is what actually matters; the frontend gate is just UX.
+  - **Promoting an account to admin** is a one-off DB update, not a feature:
+    ```bash
+    cd backend && source .venv/bin/activate
+    python -m app.scripts.promote_admin someone@example.com
+    ```
 
 ## Known Limitations / Fixes
 

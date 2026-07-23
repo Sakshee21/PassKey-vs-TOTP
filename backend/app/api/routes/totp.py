@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.security import create_password_pending_token, create_registration_token, verify_secret
+from app.models.auth_event import AuthMethod
 from app.models.backup_code import BackupCode
 from app.models.user import User
 from app.schemas.auth import (
@@ -17,6 +20,7 @@ from app.schemas.auth import (
     TOTPSetupResponse,
     TotpVerifyRequest,
 )
+from app.services.audit_service import log_auth_event
 from app.services.totp_service import (
     generate_backup_codes,
     generate_totp_secret,
@@ -68,11 +72,17 @@ def disable_totp(
 
 @router.post("/verify", response_model=SecondFactorResponse)
 def verify_totp(
-    payload: TotpVerifyRequest, db: Session = Depends(get_db)
+    payload: TotpVerifyRequest, request: Request, db: Session = Depends(get_db)
 ) -> SecondFactorResponse:
     """First step of password+TOTP login: verify the TOTP code *before* the
     password is asked for. Success yields a `password_token`, not an access
-    token - /auth/login still needs the password to actually sign in."""
+    token - /auth/login still needs the password to actually sign in.
+
+    Only a *failure* here is logged as a concluded auth_events row: success
+    doesn't mean the login attempt is over yet (the password step still has
+    to pass), so that gets logged over in /auth/login instead - one row per
+    logical attempt, not per HTTP request."""
+    start = time.monotonic()
     user = db.query(User).filter(User.email == payload.email).first()
     if user is not None and not user.is_fully_registered:
         return SecondFactorResponse(
@@ -80,6 +90,15 @@ def verify_totp(
             registration_token=create_registration_token(user.id),
         )
     if user is None or not user.totp_secret or not verify_totp_code(user.totp_secret, payload.code):
+        log_auth_event(
+            db,
+            user_id=user.id if user else None,
+            method=AuthMethod.TOTP_PASSWORD,
+            success=False,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            request=request,
+            failure_reason="invalid_totp_code",
+        )
         raise HTTPException(status_code=401, detail="Invalid email or code")
 
     return SecondFactorResponse(
@@ -89,10 +108,11 @@ def verify_totp(
 
 @router.post("/verify-backup-code", response_model=BackupCodeSecondFactorResponse)
 def verify_backup_code(
-    payload: BackupCodeVerifyRequest, db: Session = Depends(get_db)
+    payload: BackupCodeVerifyRequest, request: Request, db: Session = Depends(get_db)
 ) -> BackupCodeSecondFactorResponse:
     """First step of password+backup-code login - same idea as /verify above,
     but with a one-time backup code standing in for the TOTP code."""
+    start = time.monotonic()
     user = db.query(User).filter(User.email == payload.email).first()
     if user is not None and not user.is_fully_registered:
         return BackupCodeSecondFactorResponse(
@@ -100,6 +120,15 @@ def verify_backup_code(
             registration_token=create_registration_token(user.id),
         )
     if user is None:
+        log_auth_event(
+            db,
+            user_id=None,
+            method=AuthMethod.TOTP_PASSWORD,
+            success=False,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            request=request,
+            failure_reason="invalid_backup_code",
+        )
         raise HTTPException(status_code=401, detail="Invalid email or backup code")
 
     unused_codes = (
@@ -111,6 +140,15 @@ def verify_backup_code(
         (bc for bc in unused_codes if verify_secret(payload.backup_code, bc.code_hash)), None
     )
     if matched is None:
+        log_auth_event(
+            db,
+            user_id=user.id,
+            method=AuthMethod.TOTP_PASSWORD,
+            success=False,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            request=request,
+            failure_reason="invalid_backup_code",
+        )
         raise HTTPException(status_code=401, detail="Invalid or already-used backup code")
 
     matched.used = True

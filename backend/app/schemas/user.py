@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
@@ -9,5 +10,6 @@ class UserOut(BaseModel):
 
     id: uuid.UUID
     email: EmailStr
+    role: Literal["user", "admin"]
     is_totp_enabled: bool
     created_at: datetime

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import models  # noqa: F401  (registers models on Base.metadata)
-from app.api.routes import auth, register, totp, webauthn
+from app.api.routes import analytics, auth, register, totp, webauthn
 from app.core.config import settings
 from app.core.database import Base, engine
 
@@ -20,6 +20,7 @@ app.include_router(auth.router)
 app.include_router(register.router)
 app.include_router(totp.router)
 app.include_router(webauthn.router)
+app.include_router(analytics.router)
 
 
 @app.on_event("startup")

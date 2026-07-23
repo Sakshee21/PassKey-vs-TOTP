@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   BrowserRouter,
+  Link,
   Navigate,
   Route,
   Routes,
@@ -9,6 +10,7 @@ import {
 } from "react-router-dom";
 import { me } from "./lib/auth";
 import { clearToken, getToken } from "./lib/api";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AuthPage } from "./pages/AuthPage";
 import { Dashboard } from "./pages/Dashboard";
 import { RegisterWizard, primeRegistrationResume } from "./pages/RegisterWizard";
@@ -97,6 +99,34 @@ function ProtectedRoute({
   return <>{children}</>;
 }
 
+/** Like ProtectedRoute, but a logged-in non-admin gets an explicit 403 state
+ * instead of a silent redirect - they should see why they can't get in. */
+function AdminRoute({
+  user,
+  loading,
+  children,
+}: {
+  user: User | null;
+  loading: boolean;
+  children: React.ReactNode;
+}) {
+  if (loading) return <p className="hint">Loading…</p>;
+  if (!user) return <Navigate to="/" replace />;
+  if (user.role !== "admin") {
+    return (
+      <div className="card">
+        <h2>403 — Admin access required</h2>
+        <p className="hint">
+          Signed in as {user.email} (role: {user.role}). This page is restricted to admin
+          accounts.
+        </p>
+        <Link to="/dashboard">Back to dashboard</Link>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
 function App() {
   const { user, loading, refresh, logout } = useSession();
 
@@ -127,6 +157,14 @@ function App() {
             <ProtectedRoute user={user} loading={loading}>
               <Dashboard user={user as User} onLogout={logout} />
             </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/analytics"
+          element={
+            <AdminRoute user={user} loading={loading}>
+              <AnalyticsPage user={user as User} />
+            </AdminRoute>
           }
         />
         <Route path="*" element={<Navigate to="/" replace />} />

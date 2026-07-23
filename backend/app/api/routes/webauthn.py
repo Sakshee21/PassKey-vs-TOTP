@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+import time
+import uuid
+from typing import NoReturn
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.security import create_access_token
+from app.models.auth_event import AuthMethod
 from app.models.passkey_credential import PasskeyCredential
 from app.models.user import User
 from app.schemas.auth import Token
@@ -13,6 +18,7 @@ from app.schemas.webauthn import (
     WebAuthnCredentialOut,
     WebAuthnRegisterFinishRequest,
 )
+from app.services.audit_service import log_auth_event
 from app.services.webauthn_service import (
     IS_DISCOVERABLE,
     RESIDENT_KEY_POLICY_VALUE,
@@ -74,10 +80,21 @@ def register_verify(
 
 @router.post("/authenticate/options")
 def authenticate_options(
-    payload: WebAuthnAuthenticateStartRequest, db: Session = Depends(get_db)
+    payload: WebAuthnAuthenticateStartRequest, request: Request, db: Session = Depends(get_db)
 ) -> Response:
     user = db.query(User).filter(User.email == payload.email).first()
     if user is None or not user.passkey_credentials:
+        # This is also a terminal failure of a login attempt (the ceremony
+        # never even starts), so it gets logged here rather than /verify.
+        log_auth_event(
+            db,
+            user_id=user.id if user else None,
+            method=AuthMethod.PASSKEY,
+            success=False,
+            latency_ms=0,
+            request=request,
+            failure_reason="no_passkeys_registered",
+        )
         raise HTTPException(status_code=404, detail="No passkeys registered for this account")
 
     credential_ids = [cred.credential_id for cred in user.passkey_credentials]
@@ -87,11 +104,27 @@ def authenticate_options(
 
 @router.post("/authenticate/verify", response_model=Token)
 def authenticate_verify(
-    payload: WebAuthnAuthenticateFinishRequest, db: Session = Depends(get_db)
+    payload: WebAuthnAuthenticateFinishRequest, request: Request, db: Session = Depends(get_db)
 ) -> Token:
+    """A passkey login is a single ceremony - unlike password+TOTP, there's no
+    multi-request handoff, so the whole attempt is logged right here."""
+    start = time.monotonic()
+
+    def _fail(user_id: uuid.UUID | None, reason: str, status_code: int, detail: str) -> NoReturn:
+        log_auth_event(
+            db,
+            user_id=user_id,
+            method=AuthMethod.PASSKEY,
+            success=False,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            request=request,
+            failure_reason=reason,
+        )
+        raise HTTPException(status_code=status_code, detail=detail)
+
     user = db.query(User).filter(User.email == payload.email).first()
     if user is None:
-        raise HTTPException(status_code=401, detail="Invalid credential")
+        _fail(None, "unknown_account", 401, "Invalid credential")
 
     raw_id = payload.credential.get("id")
     credential = (
@@ -100,16 +133,24 @@ def authenticate_verify(
         .first()
     )
     if credential is None:
-        raise HTTPException(status_code=401, detail="Unknown passkey")
+        _fail(user.id, "unknown_passkey", 401, "Unknown passkey")
 
     try:
         verification = verify_authentication(
             payload.email, payload.credential, credential.public_key, credential.sign_count
         )
     except Exception as exc:
-        raise HTTPException(status_code=401, detail=f"Passkey authentication failed: {exc}")
+        _fail(user.id, "ceremony_failed", 401, f"Passkey authentication failed: {exc}")
 
     credential.sign_count = verification.new_sign_count
     db.commit()
 
+    log_auth_event(
+        db,
+        user_id=user.id,
+        method=AuthMethod.PASSKEY,
+        success=True,
+        latency_ms=int((time.monotonic() - start) * 1000),
+        request=request,
+    )
     return Token(access_token=create_access_token(user.id, method="passkey"))

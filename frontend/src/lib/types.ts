@@ -1,6 +1,9 @@
+export type UserRole = "user" | "admin";
+
 export interface User {
   id: string;
   email: string;
+  role: UserRole;
   is_totp_enabled: boolean;
   created_at: string;
 }
@@ -62,4 +65,31 @@ export interface WebAuthnCredentialOut {
   backup_state: boolean;
   device_name: string | null;
   created_at: string;
+}
+
+export type AuthMethod = "passkey" | "totp_password";
+
+export interface MethodStat {
+  method: AuthMethod;
+  total_attempts: number;
+  successful_attempts: number;
+  success_rate: number;
+  avg_latency_ms: number | null;
+}
+
+export interface TimeBucket {
+  bucket: string;
+  attempts: number;
+}
+
+export interface FailureReason {
+  reason: string;
+  count: number;
+}
+
+export interface AnalyticsSummary {
+  by_method: MethodStat[];
+  attempts_over_time: TimeBucket[];
+  failure_reasons: FailureReason[];
+  total_events: number;
 }

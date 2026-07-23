@@ -55,6 +55,15 @@ def get_current_user(
     return user_from_token(token, "access", db)
 
 
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Checks the role on the JWT-resolved User (a fresh DB lookup via
+    get_current_user), not just that the JWT is valid - a revoked admin role
+    is rejected on the very next request, not just at token-issue time."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+
 def get_registration_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> User:

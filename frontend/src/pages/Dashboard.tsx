@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   getBackupCodesStatus,
   getSessionLoginMethod,
@@ -85,6 +86,11 @@ export function Dashboard({ user, onLogout }: Props) {
         <button className="secondary" onClick={onLogout}>
           Log out
         </button>
+        {user.role === "admin" && (
+          <Link to="/analytics" style={{ marginLeft: "0.5rem" }}>
+            View analytics
+          </Link>
+        )}
       </div>
 
       <div className="card">

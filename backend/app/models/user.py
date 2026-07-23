@@ -33,6 +33,10 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
+    # Plain string, not a DB enum, by design - "user" or "admin". Promotion is
+    # a one-off DB update (see app/scripts/promote_admin.py), not a feature.
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user", server_default="user")
+
     passkey_credentials: Mapped[list["PasskeyCredential"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
@@ -43,6 +47,10 @@ class User(Base):
     @property
     def is_totp_enabled(self) -> bool:
         return self.totp_secret is not None
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == "admin"
 
     @property
     def is_fully_registered(self) -> bool:
