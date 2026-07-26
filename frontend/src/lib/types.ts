@@ -80,6 +80,7 @@ export interface MethodStat {
 export interface TimeBucket {
   bucket: string;
   attempts: number;
+  simulated_attempts: number;
 }
 
 export interface FailureReason {
@@ -92,4 +93,5 @@ export interface AnalyticsSummary {
   attempts_over_time: TimeBucket[];
   failure_reasons: FailureReason[];
   total_events: number;
+  simulated_events: number;
 }

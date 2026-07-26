@@ -36,6 +36,13 @@ class AuthEvent(Base):
     user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # True only for traffic from security-demos/attack_sim.py (proven via a
+    # shared token, see app/api/deps.py:is_simulated_request) - lets the
+    # analytics dashboard's charts include a labeled, distinguishable spike
+    # from a simulated attack run rather than silently mixing it with real
+    # login attempts.
+    is_simulated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

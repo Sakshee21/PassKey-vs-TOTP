@@ -16,3 +16,6 @@ PyJWT==2.10.1
 
 # API extras
 python-multipart==0.0.20
+
+# Rate limiting
+slowapi==0.1.9

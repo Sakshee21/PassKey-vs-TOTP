@@ -59,13 +59,22 @@ def analytics_summary(db: Session = Depends(get_db)) -> AnalyticsSummary:
 
     bucket = func.date_trunc("hour", AuthEvent.timestamp)
     time_rows = (
-        db.query(bucket.label("bucket"), func.count().label("attempts"))
+        db.query(
+            bucket.label("bucket"),
+            func.count().label("attempts"),
+            func.sum(case((AuthEvent.is_simulated.is_(True), 1), else_=0)).label("simulated"),
+        )
         .group_by(bucket)
         .order_by(bucket)
         .all()
     )
     attempts_over_time = [
-        TimeBucket(bucket=row.bucket.isoformat(), attempts=row.attempts) for row in time_rows
+        TimeBucket(
+            bucket=row.bucket.isoformat(),
+            attempts=row.attempts,
+            simulated_attempts=int(row.simulated or 0),
+        )
+        for row in time_rows
     ]
 
     failure_rows = (
@@ -81,10 +90,14 @@ def analytics_summary(db: Session = Depends(get_db)) -> AnalyticsSummary:
     failure_reasons = [FailureReason(reason=row.reason, count=row.count) for row in failure_rows]
 
     total_events = db.query(func.count(AuthEvent.id)).scalar() or 0
+    simulated_events = (
+        db.query(func.count(AuthEvent.id)).filter(AuthEvent.is_simulated.is_(True)).scalar() or 0
+    )
 
     return AnalyticsSummary(
         by_method=by_method,
         attempts_over_time=attempts_over_time,
         failure_reasons=failure_reasons,
         total_events=total_events,
+        simulated_events=simulated_events,
     )

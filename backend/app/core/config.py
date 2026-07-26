@@ -18,5 +18,13 @@ class Settings(BaseSettings):
 
     FRONTEND_ORIGIN: str = "http://localhost:5173"
 
+    # Shared secret that security-demos/attack_sim.py sends as the
+    # X-Attack-Sim-Token header, so the resulting auth_events rows can be
+    # tagged is_simulated=true. Knowing this token doesn't bypass anything
+    # (rate limiting and password checks still apply in full) - it only
+    # controls a label on an audit-log row, so real traffic can't be
+    # mislabeled as a demo and vice versa without it.
+    ATTACK_SIM_TOKEN: str = "change-me-attack-sim-token"
+
 
 settings = Settings()

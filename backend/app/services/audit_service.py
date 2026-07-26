@@ -15,6 +15,7 @@ def log_auth_event(
     latency_ms: int,
     request: Request | None,
     failure_reason: str | None = None,
+    is_simulated: bool = False,
 ) -> None:
     """Records one row per *logical* login attempt (not per HTTP request) -
     for the flipped-order TOTP+password flow, that's only once the attempt
@@ -30,6 +31,7 @@ def log_auth_event(
             ip_address=request.client.host if request and request.client else None,
             user_agent=request.headers.get("user-agent") if request else None,
             failure_reason=failure_reason,
+            is_simulated=is_simulated,
         )
     )
     db.commit()

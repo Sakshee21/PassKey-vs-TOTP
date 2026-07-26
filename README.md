@@ -33,6 +33,8 @@ frontend/
   .env.example
 docker-compose.yml   # local Postgres
 .env.example         # docker-compose Postgres credentials
+security-demos/       # standalone: credential-stuffing + rate-limit demo, WebAuthn
+                       # origin-binding proof (not part of the running app)
 ```
 
 ## Local setup
@@ -136,6 +138,24 @@ App: http://localhost:5173
     python -m app.scripts.promote_admin someone@example.com
     ```
 
+## Security
+
+- **Rate limiting** ([slowapi](https://github.com/laurentS/slowapi), 5 requests/minute per IP,
+  `app/core/rate_limit.py`) on every step of password-based login — `/auth/login`, `/totp/verify`,
+  `/totp/verify-backup-code` — returns `429` past the limit. In-memory storage, fine for one dev
+  process; swap for a Redis backend before running multiple workers.
+- **`security-demos/`** (see its own README) — two standalone demos, deliberately different in
+  kind:
+  - `attack_sim.py` — a genuine simulated credential-stuffing run against `/auth/login`, showing
+    rate limiting cut it off. Its traffic can be tagged `is_simulated=true` on `auth_events` (via a
+    shared `X-Attack-Sim-Token` header, checked against the backend's `ATTACK_SIM_TOKEN`), so it
+    shows up as a clearly labeled spike on the analytics dashboard instead of blending into real
+    login attempts.
+  - `capture_assertion.mjs` + `verify_origin_binding.py` — **not** an attack demo. There's no
+    bypass to show for WebAuthn's origin binding, so instead of faking one, this proves the
+    property structurally: one real signed assertion, accepted against the origin it was signed
+    for and rejected against a different one, using the app's actual verification code.
+
 ## Known Limitations / Fixes
 
 - **Passkey "resident/discoverable" status is stored, not inferred.** An earlier version stored a
@@ -154,6 +174,15 @@ App: http://localhost:5173
   (derived from that policy, not from the verification response). `backup_eligible` and
   `backup_state` are kept as their own honestly-labeled columns — the sync-status signal is still
   useful, it's just no longer used to answer a question it can't actually answer.
+
+- **`password_token` is reusable, not single-use.** Once `/totp/verify` (or `/totp/verify-backup-code`)
+  issues a `password_token`, it's a stateless JWT valid for 5 minutes — nothing currently
+  invalidates it after a failed `/auth/login` attempt, so it can be tried against multiple
+  passwords within that window. `security-demos/attack_sim.py` demonstrates this directly: one
+  phished TOTP pass, then several password guesses against the same token. Rate limiting (above)
+  bounds the exposure to a handful of guesses per minute, but a stronger fix would be marking the
+  token consumed after its first use (or first failure) — not done here, since the explicit ask was
+  rate limiting as the mitigation, not a token-lifecycle change.
 
 ## Notes / production TODOs
 

@@ -4,8 +4,9 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.api.deps import decode_purpose_token, get_current_user
+from app.api.deps import decode_purpose_token, get_current_user, is_simulated_request
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import create_access_token, verify_secret
 from app.models.auth_event import AuthMethod
 from app.models.user import User
@@ -17,7 +18,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=Token)
-def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> Token:
+@limiter.limit("5/minute")
+def login(
+    request: Request,
+    payload: LoginRequest,
+    db: Session = Depends(get_db),
+    simulated: bool = Depends(is_simulated_request),
+) -> Token:
     """Second (and final) step of password+TOTP login: the second factor was
     already verified by /totp/verify or /totp/verify-backup-code, which is
     what `password_token` proves. Only the password remains to be checked.
@@ -46,6 +53,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
             latency_ms=int((time.monotonic() - start) * 1000),
             request=request,
             failure_reason="invalid_password",
+            is_simulated=simulated,
         )
         raise HTTPException(status_code=401, detail="Incorrect password")
 
@@ -56,6 +64,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         success=True,
         latency_ms=int((time.monotonic() - start) * 1000),
         request=request,
+        is_simulated=simulated,
     )
     return Token(access_token=create_access_token(user.id, method=method_label))
 

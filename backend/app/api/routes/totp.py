@@ -3,8 +3,9 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, is_simulated_request
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import create_password_pending_token, create_registration_token, verify_secret
 from app.models.auth_event import AuthMethod
 from app.models.backup_code import BackupCode
@@ -71,8 +72,12 @@ def disable_totp(
 
 
 @router.post("/verify", response_model=SecondFactorResponse)
+@limiter.limit("5/minute")
 def verify_totp(
-    payload: TotpVerifyRequest, request: Request, db: Session = Depends(get_db)
+    request: Request,
+    payload: TotpVerifyRequest,
+    db: Session = Depends(get_db),
+    simulated: bool = Depends(is_simulated_request),
 ) -> SecondFactorResponse:
     """First step of password+TOTP login: verify the TOTP code *before* the
     password is asked for. Success yields a `password_token`, not an access
@@ -98,6 +103,7 @@ def verify_totp(
             latency_ms=int((time.monotonic() - start) * 1000),
             request=request,
             failure_reason="invalid_totp_code",
+            is_simulated=simulated,
         )
         raise HTTPException(status_code=401, detail="Invalid email or code")
 
@@ -107,8 +113,12 @@ def verify_totp(
 
 
 @router.post("/verify-backup-code", response_model=BackupCodeSecondFactorResponse)
+@limiter.limit("5/minute")
 def verify_backup_code(
-    payload: BackupCodeVerifyRequest, request: Request, db: Session = Depends(get_db)
+    request: Request,
+    payload: BackupCodeVerifyRequest,
+    db: Session = Depends(get_db),
+    simulated: bool = Depends(is_simulated_request),
 ) -> BackupCodeSecondFactorResponse:
     """First step of password+backup-code login - same idea as /verify above,
     but with a one-time backup code standing in for the TOTP code."""
@@ -128,6 +138,7 @@ def verify_backup_code(
             latency_ms=int((time.monotonic() - start) * 1000),
             request=request,
             failure_reason="invalid_backup_code",
+            is_simulated=simulated,
         )
         raise HTTPException(status_code=401, detail="Invalid email or backup code")
 
@@ -148,6 +159,7 @@ def verify_backup_code(
             latency_ms=int((time.monotonic() - start) * 1000),
             request=request,
             failure_reason="invalid_backup_code",
+            is_simulated=simulated,
         )
         raise HTTPException(status_code=401, detail="Invalid or already-used backup code")
 

@@ -12,6 +12,7 @@ class MethodStat(BaseModel):
 class TimeBucket(BaseModel):
     bucket: str
     attempts: int
+    simulated_attempts: int
 
 
 class FailureReason(BaseModel):
@@ -24,3 +25,4 @@ class AnalyticsSummary(BaseModel):
     attempts_over_time: list[TimeBucket]
     failure_reasons: list[FailureReason]
     total_events: int
+    simulated_events: int

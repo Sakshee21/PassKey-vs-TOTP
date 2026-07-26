@@ -24,6 +24,9 @@ import type { AnalyticsSummary, User } from "../lib/types";
 const PALETTE_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a"];
 const PALETTE_DARK = ["#3987e5", "#d95926", "#199e70"];
 const OTHER_COLOR = "#898781"; // mode-invariant muted/neutral, for the pie's "Other" fold
+// Reserved status color (dataviz skill), never reused as a categorical hue -
+// flags simulated-attack traffic as a state, not a series identity.
+const CRITICAL_COLOR = "#d03b3b";
 
 const METHOD_LABEL: Record<string, string> = {
   passkey: "Passkey",
@@ -133,7 +136,9 @@ export function AnalyticsPage({ user }: Props) {
       hour: "numeric",
     }),
     attempts: t.attempts,
+    simulated: t.simulated_attempts,
   }));
+  const hasSimulatedData = timeSeries.some((t) => t.simulated > 0);
 
   // Pie is an all-pairs-adjacent context (every slice sits beside every other),
   // so cap at 3 explicit categorical colors and fold the rest into "Other".
@@ -155,7 +160,17 @@ export function AnalyticsPage({ user }: Props) {
         <p className="hint">
           Viewing as {user.email} — <strong>admin</strong>
         </p>
-        <p className="hint">{data.total_events} logged login attempts.</p>
+        <p className="hint">
+          {data.total_events} logged login attempts
+          {data.simulated_events > 0 && (
+            <>
+              {" "}
+              (<strong style={{ color: CRITICAL_COLOR }}>{data.simulated_events} simulated</strong>
+              , from security-demos/attack_sim.py)
+            </>
+          )}
+          .
+        </p>
         <Link to="/dashboard">Back to dashboard</Link>
       </div>
 
@@ -247,16 +262,30 @@ export function AnalyticsPage({ user }: Props) {
               axisLine={false}
               tickLine={false}
             />
-            <Tooltip contentStyle={tooltipStyle} formatter={(v) => [v, "Attempts"]} />
+            <Tooltip contentStyle={tooltipStyle} />
+            {hasSimulatedData && <Legend wrapperStyle={{ fontSize: 13 }} />}
             <Line
               type="monotone"
               dataKey="attempts"
+              name="All attempts"
               stroke={palette[0]}
               strokeWidth={2}
               dot={{ r: 4, fill: palette[0] }}
               activeDot={{ r: 5 }}
               isAnimationActive={false}
             />
+            {hasSimulatedData && (
+              <Line
+                type="monotone"
+                dataKey="simulated"
+                name="Simulated (attack_sim.py)"
+                stroke={CRITICAL_COLOR}
+                strokeWidth={2}
+                dot={{ r: 4, fill: CRITICAL_COLOR }}
+                activeDot={{ r: 5 }}
+                isAnimationActive={false}
+              />
+            )}
           </LineChart>
         </ResponsiveContainer>
       </div>

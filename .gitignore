@@ -12,7 +12,15 @@ backend/__pycache__/
 frontend/node_modules/
 frontend/dist/
 
+# security-demos: generated output (test-account secrets, captured assertions)
+security-demos/node_modules/
+security-demos/victim.json
+security-demos/captured_assertion.json
+security-demos/*.log
+
 # Editors / OS
 .DS_Store
 .vscode/
 .idea/
+
+.claude
