@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import {
   persistSession,
+  platformAuthenticatorLikelyAvailable,
   registrationPasskeyConfirm,
+  registrationPasskeySkip,
   registrationStatus,
   registrationTotpConfirm,
   registrationTotpSetup,
@@ -88,6 +90,9 @@ export function RegisterWizard({ onComplete, onBackToLogin }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Step 3 state - null while the capability check is still in flight
+  const [platformAuthAvailable, setPlatformAuthAvailable] = useState<boolean | null>(null);
+
   // Resume an in-progress wizard after a reload, trusting server-side status
   // over whatever step was last cached client-side.
   useEffect(() => {
@@ -119,6 +124,17 @@ export function RegisterWizard({ onComplete, onBackToLogin }: Props) {
         );
     }
   }, [step, registrationToken, secret, backupCodes]);
+
+  useEffect(() => {
+    if (step !== 3) return;
+    let cancelled = false;
+    platformAuthenticatorLikelyAvailable().then((available) => {
+      if (!cancelled) setPlatformAuthAvailable(available);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
 
   async function handleStart(e: React.FormEvent) {
     e.preventDefault();
@@ -164,6 +180,22 @@ export function RegisterWizard({ onComplete, onBackToLogin }: Props) {
       setError(
         err instanceof ApiError ? err.message : "Passkey ceremony failed or was cancelled",
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePasskeySkip() {
+    if (!registrationToken) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const token = await registrationPasskeySkip(registrationToken);
+      persistSession(token);
+      saveStored(null);
+      onComplete();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to skip the passkey step");
     } finally {
       setBusy(false);
     }
@@ -257,10 +289,27 @@ export function RegisterWizard({ onComplete, onBackToLogin }: Props) {
             prompt you — prefer a discoverable (resident) passkey so you can sign in without typing
             your email.
           </p>
+          {platformAuthAvailable === false && (
+            <p className="hint">
+              We couldn't detect a platform authenticator (Windows Hello, Touch ID, etc.) on this
+              device. If you have a physical security key, click "Register passkey" and use that
+              instead. Only if you have neither should you skip this step.
+            </p>
+          )}
           {error && <p className="error">{error}</p>}
           <button onClick={handlePasskey} disabled={busy}>
             Register passkey
           </button>
+          {platformAuthAvailable === false && (
+            <button
+              className="secondary"
+              style={{ marginTop: "0.5rem" }}
+              onClick={handlePasskeySkip}
+              disabled={busy}
+            >
+              Skip for now — add a passkey later
+            </button>
+          )}
         </div>
       )}
 

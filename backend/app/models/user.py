@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -37,6 +37,14 @@ class User(Base):
     # a one-off DB update (see app/scripts/promote_admin.py), not a feature.
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="user", server_default="user")
 
+    # Set when a user explicitly declines the passkey step during registration
+    # (e.g. no platform authenticator or security key available). Lets
+    # is_fully_registered treat the account as complete without a passkey -
+    # they can still add one later from the dashboard.
+    passkey_skipped: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     passkey_credentials: Mapped[list["PasskeyCredential"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
@@ -54,9 +62,10 @@ class User(Base):
 
     @property
     def is_fully_registered(self) -> bool:
-        """True once all three registration steps (password, TOTP, passkey) are done."""
+        """True once password + TOTP are set and the passkey step is resolved -
+        either a passkey was registered, or the user explicitly skipped it."""
         return (
             self.password_hash is not None
             and self.totp_secret is not None
-            and len(self.passkey_credentials) > 0
+            and (len(self.passkey_credentials) > 0 or self.passkey_skipped)
         )

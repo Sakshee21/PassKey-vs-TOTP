@@ -102,6 +102,22 @@ def registration_passkey_options(user: User = Depends(get_registration_user)) ->
     return Response(content=options_json, media_type="application/json")
 
 
+@router.post("/passkey/skip", response_model=Token)
+def registration_passkey_skip(
+    user: User = Depends(get_registration_user), db: Session = Depends(get_db)
+) -> Token:
+    """Lets a user finish registration without a passkey - e.g. no platform
+    authenticator or security key available. Password+TOTP is a complete,
+    valid account; a passkey can be added later from the dashboard."""
+    if user.totp_secret is None:
+        raise HTTPException(status_code=400, detail="Complete TOTP setup first")
+
+    user.passkey_skipped = True
+    db.commit()
+
+    return Token(access_token=create_access_token(user.id, method="password_totp"))
+
+
 @router.post("/passkey/confirm", response_model=Token)
 def registration_passkey_confirm(
     payload: WebAuthnRegisterFinishRequest,

@@ -102,6 +102,27 @@ export async function registrationPasskeyConfirm(registrationToken: string): Pro
   return api.post<Token>("/register/passkey/confirm", { credential }, registrationToken);
 }
 
+/** Declines the passkey step (e.g. no authenticator available on this
+ * device/browser) and finishes registration on password+TOTP alone. A
+ * passkey can still be added later from the dashboard. */
+export function registrationPasskeySkip(registrationToken: string): Promise<Token> {
+  return api.post<Token>("/register/passkey/skip", undefined, registrationToken);
+}
+
+/** Best-effort check for whether this browser/device is likely to be able to
+ * complete a passkey ceremony at all (a platform authenticator like Windows
+ * Hello/Touch ID, or a browser signed into a passkey-syncing password
+ * manager). A `false`/unknown result doesn't rule out a physical security
+ * key, so it's only used to surface a hint — never to hide the button. */
+export async function platformAuthenticatorLikelyAvailable(): Promise<boolean> {
+  if (typeof window === "undefined" || !window.PublicKeyCredential) return false;
+  try {
+    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch {
+    return false;
+  }
+}
+
 // --- Account management (already signed in) ---------------------------------
 
 export function setupTotp(): Promise<TOTPSetupResponse> {
